@@ -115,7 +115,7 @@ if __name__ == "__main__":
     fetcher = RotatingProxyFetcher(proxy_list=None, max_retries=3, timeout=15)
 
     # Тестируем
-    url = "https://bcs-express.ru/tehanaliz/sber/04.12.25"  # сервис возвращает IP, с которого пришёл запрос
+    url = "https://www.profinance.ru/news2/2025/12/09/chzd-sberbank-zhdet-ralli-rossijskikh-aktsij-v-techenie-predstoyaschego-goda.html"
     response = fetcher.fetch(url)
 
     if response:
