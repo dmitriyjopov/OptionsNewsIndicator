@@ -45,42 +45,52 @@ months_map = {
 }
 
 DATE_SCHEMA = { # формат списка [позиция числа, позиция месяца, позиция года, часы, минуты]
-        # "2025-12-01 23:13:00+07:00" - из json
-        (r'(\d{4})-(\d{2})-(\d{2})\s+(\d{2}):(\d{2}):\d{2}[+-]\d{2}:\d{2}', True): [0, 1, 2, 3, 4],
+    # "2025-12-01 23:13:00+07:00" - из json
+    (r'(\d{4})-(\d{2})-(\d{2})\s+(\d{2}):(\d{2}):\d{2}[+-]\d{2}:\d{2}', True): [0, 1, 2, 3, 4],
 
-        # 12-12-2026
-        (r'(\d{4})-(\d{2})-(\d{2})$', False): [0, 1, 2],
+    # 2025-12-01 13:08:28
+    (r'(\d{4})-(\d{2})-(\d{2})\s+(\d{2}):(\d{2})', True): [2, 1, 0, 3, 4],
 
-        # Паттерн: "03 декабря 2025, 11:35" или "3 дек 2025 11:35"
-        (r'(\d{1,2})\s+([а-яa-z]+)\s+(\d{4})[,\s]+(\d{1,2}):(\d{1,2})', True): [0, 1, 2, 3, 4],
-        
-        # Паттерн: "03 декабря 2025" или "3 дек 2025"
-        (r'(\d{1,2})\s+([а-яa-z]+)\s+(\d{4})', False): [0, 1, 2, None, None],
-        
-        # "Дата публикации: 02 дек 2025"
-        (r'дата публикации:\s*(\d{1,2})\s+([а-яa-z]+)\s+(\d{4})', False): [1, 2, 3, None, None],
+    # 12-12-2026
+    (r'(\d{4})-(\d{2})-(\d{2})$', False): [0, 1, 2],
 
-        # 04.12.2025 в 07:56
-        (r'(\d{2})\.(\d{2})\.(\d{4})\s+в\s+(\d{1,2}):(\d{2})', True): [0, 1, 2, 3, 4],
+    # Паттерн: "03 декабря 2025, 11:35" или "3 дек 2025 11:35"
+    (r'(\d{1,2})\s+([а-яa-z]+)\s+(\d{4})[,\s]+(\d{1,2}):(\d{1,2})', True): [0, 1, 2, 3, 4],
+    
+    # Паттерн: "03 декабря 2025" или "3 дек 2025"
+    (r'(\d{1,2})\s+([а-яa-z]+)\s+(\d{4})', False): [0, 1, 2, None, None],
+    
+    # "Дата публикации: 02 дек 2025"
+    (r'дата публикации:\s*(\d{1,2})\s+([а-яa-z]+)\s+(\d{4})', False): [1, 2, 3, None, None],
 
-        # 04.12.2025 07:56
-        (r'(\d{2})\.(\d{2})\.(\d{4})\s*(?:в)?\s*(\d{1,2}):(\d{2})', True): [0, 1, 2, 3, 4],
+    # 04.12.2025 в 07:56
+    (r'(\d{2})\.(\d{2})\.(\d{4})\s+в\s+(\d{1,2}):(\d{2})', True): [0, 1, 2, 3, 4],
 
-        # 5 декабря 2025 в 11:36
-        (r'(\d{1,2})\s+([а-яa-z]+)\s+в\s+(\d{4})', True): [0, 1, 2, 3, 4],
+    # 04.12.2025 07:56
+    (r'(\d{2})\.(\d{2})\.(\d{4})\s*(?:в)?\s*(\d{1,2}):(\d{2})', True): [0, 1, 2, 3, 4],
 
-        # 17:36, 14 декабря 2025 или 17:36 14 декабря 2025 
-        (r'(\d{1,2}):(\d{2})[,\s]+(\d{1,2})\s+([а-яёa-z]+)\s+(\d{4})', True): [2, 3, 4, 0, 1],
+    # 5 декабря 2025 в 11:36
+    (r'(\d{1,2})\s+([а-яa-z]+)\s+в\s+(\d{4})', True): [0, 1, 2, 3, 4],
 
-        # 1. 05.07.2022 г. (с точкой в конце и "г.")
-        (r'(\d{2})\.(\d{2})\.(\d{4})\s*г\.', False): [0, 1, 2, None, None],
-        
-        # 2. 30.12.25 12:53 (двузначный год)
-        (r'(\d{2})\.(\d{2})\.(\d{2})\s+(\d{2}):(\d{2})', True): [0, 1, 2, 3, 4],
-        
-        # 3. пт, 02/27/2026 - 17:27 (с днем недели, слешами и дефисом)
-        (r'[а-я]{2},\s*(\d{2})/(\d{2})/(\d{4})\s*-\s*(\d{2}):(\d{2})', True): [0, 1, 2, 3, 4],
-    }
+    # 17:36, 14 декабря 2025 или 17:36 14 декабря 2025 
+    (r'(\d{1,2}):(\d{2})[,\s]+(\d{1,2})\s+([а-яёa-z]+)\s+(\d{4})', True): [2, 3, 4, 0, 1],
+
+    # 1. 05.07.2022 г. (с точкой в конце и "г.")
+    (r'(\d{2})\.(\d{2})\.(\d{4})\s*г\.', False): [0, 1, 2, None, None],
+    
+    # 2. 30.12.25 12:53 (двузначный год)
+    (r'(\d{2})\.(\d{2})\.(\d{2})\s+(\d{2}):(\d{2})', True): [0, 1, 2, 3, 4],
+    
+    # 3. пт, 02/27/2026 - 17:27 (с днем недели, слешами и дефисом)
+    (r'[а-я]{2},\s*(\d{2})/(\d{2})/(\d{4})\s*-\s*(\d{2}):(\d{2})', True): [0, 1, 2, 3, 4],
+
+    # 09.12.2025 | 18:47
+    (r'(\d{2})\.(\d{2})\.(\d{4})\s*|\s*(\d{2}):(\d{2})', True): [0, 1, 2, 3, 4],
+
+    # 4 декабря 2025 года, 11:04
+    (r'(\d{1,2})\s+([а-яa-z]+)\s+(\d{4})\s+года?\s*[,]?\s*(\d{1,2}):(\d{2})', True): [0, 1, 2, 3, 4]
+}
+
 
 def robust_parse_debug(date_str):
     if not date_str: return None, "EMPTY_STRING"
@@ -96,6 +106,20 @@ def robust_parse_debug(date_str):
         return "MATCHED_DATEUTIL", "fuzzy_parser"
     except:
         return "FAILED", "no_pattern_match"
+
+def find_key_recursive(obj, key_to_find):
+    """Рекурсивный поиск ключа в словаре или списке."""
+    if isinstance(obj, dict):
+        if key_to_find in obj:
+            return obj[key_to_find]
+        for v in obj.values():
+            result = find_key_recursive(v, key_to_find)
+            if result: return result
+    elif isinstance(obj, list):
+        for item in obj:
+            result = find_key_recursive(item, key_to_find)
+            if result: return result
+    return None
 
 def get_verbose_date_info(driver, url, gnewsdate):
     debug_logger.info(f"\n{'#'*30} START ANALYSIS: {url} {'#'*30}")
@@ -164,19 +188,20 @@ def get_verbose_date_info(driver, url, gnewsdate):
                 content = s.get_attribute("textContent")
                 try:
                     data = json.loads(content)
-                    debug_logger.info(f" Тип JSON-LD: {type(data)}")
-                    debug_logger.info(f"   -> Raw JSON-LD: {str(data)}")
-                    if isinstance(data, list):
-                        items = data
-                    else:
-                        items = [data]
-                    for item in items: 
-                        res = item.get("datePublished") or item.get("dateCreated")
-                        if res:
-                            debug_logger.info(f"НАШЛИ ВРЕМЯ!: {res}")
+                    # Ищем дату в любом месте JSON (и в корне, и в @graph)
+                    res = find_key_recursive(data, "datePublished") or find_key_recursive(data, "dateCreated")
                     
-                except:
-                    debug_logger.info(f"   -> Invalid JSON in script tag")
+                    if res:
+                        debug_logger.info(f"!!! НАШЛИ ДАТУ: {res}")
+                        # Здесь можно сразу вернуть значение, если это не просто дебаг-функция
+                        # return res 
+                    else:
+                        debug_logger.info("Дата в этом блоке JSON-LD не найдена")
+                        
+                except json.JSONDecodeError:
+                    debug_logger.error("Ошибка: Реально невалидный JSON")
+                except Exception as e:
+                    debug_logger.error(f"Ошибка логики при разборе JSON: {e}")
         else:
             debug_logger.info(f"   -> No JSON-LD found")
 
@@ -219,6 +244,7 @@ def main():
             line.split(" | ")[-1].split("GnewsDate: ", 1)[-1].strip()) 
             for line in f if line.strip() and line.split(" | ")[0] == 'EMPTY'] # элементы - (url, date)
         
+    # entries = [('https://news.google.com/rss/articles/CBMiV0FVX3lxTFBfRXZCbC10NkpYZmJEREZUS3BvbmFrTVdBWTBsWnVURXNoTU9RYUxUNWFULWpCQlE4MUJSMTZIOVJVaVFxNWVqdWItZHJ4dTVfb1M5SHV0dw?oc=5&hl=en-US&gl=US&ceid=US:en', 'Sun, 07 Dec 2025 08:00:00 GMT')]
     print(len(entries))
 
     driver = init_driver()

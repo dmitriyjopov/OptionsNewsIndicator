@@ -11,6 +11,7 @@ from sumy.nlp.tokenizers import Tokenizer
 from sumy.summarizers.lex_rank import LexRankSummarizer
 from selenium.common.exceptions import NoSuchElementException, TimeoutException, WebDriverException
 from nltk.tokenize import sent_tokenize
+import undetected_chromedriver as uc
 import re, json, time, trafilatura, nltk, csv, os, logging
 from datetime import datetime, timedelta
 from selenium.webdriver.support.ui import WebDriverWait
@@ -89,7 +90,8 @@ possible_selectors = [
     "time", "div.text-nowrap.d-flex.flex-wrap.gap-3 > div", 
     "div[class='MatterTop_date__mPSNt flex gap-[8px] mb-[16px] font-medium']",
     "div[class='tg-label-standard-regular-4b7-9-0-1 KVFz2']", "div[data-test='article-created-at']",
-    "[data-qa='Datetime']", "[itemprop='datePublished']", "div[data-e2e-id='data-dynamic']"
+    "[data-qa='Datetime']", "[itemprop='datePublished']", "div[data-e2e-id='data-dynamic']",
+    "div[class='col-auto fw-bold']"
 ]
 
 RU_MONTH_VALUES = {
@@ -120,6 +122,53 @@ months_map = {
     'июль': 7, 'август': 8, 'сентябрь': 9, 'октябрь': 10, 'ноябрь': 11, 'декабрь': 12
 }
 
+custom_patterns = { # формат списка [позиция числа, позиция месяца, позиция года, часы, минуты]
+    # "2025-12-01 23:13:00+07:00" - из json
+    (r'(\d{4})-(\d{2})-(\d{2})\s+(\d{2}):(\d{2}):\d{2}[+-]\d{2}:\d{2}', True): [0, 1, 2, 3, 4],
+
+    # 2025-12-01 13:08:28
+    (r'(\d{4})-(\d{2})-(\d{2})\s+(\d{2}):(\d{2})', True): [2, 1, 0, 3, 4],
+
+    # 12-12-2026
+    (r'(\d{4})-(\d{2})-(\d{2})$', False): [0, 1, 2],
+
+    # Паттерн: "03 декабря 2025, 11:35" или "3 дек 2025 11:35"
+    (r'(\d{1,2})\s+([а-яa-z]+)\s+(\d{4})[,\s]+(\d{1,2}):(\d{1,2})', True): [0, 1, 2, 3, 4],
+    
+    # Паттерн: "03 декабря 2025" или "3 дек 2025"
+    (r'(\d{1,2})\s+([а-яa-z]+)\s+(\d{4})', False): [0, 1, 2, None, None],
+    
+    # "Дата публикации: 02 дек 2025"
+    (r'дата публикации:\s*(\d{1,2})\s+([а-яa-z]+)\s+(\d{4})', False): [1, 2, 3, None, None],
+
+    # 04.12.2025 в 07:56
+    (r'(\d{2})\.(\d{2})\.(\d{4})\s+в\s+(\d{1,2}):(\d{2})', True): [0, 1, 2, 3, 4],
+
+    # 04.12.2025 07:56
+    (r'(\d{2})\.(\d{2})\.(\d{4})\s*(?:в)?\s*(\d{1,2}):(\d{2})', True): [0, 1, 2, 3, 4],
+
+    # 5 декабря 2025 в 11:36
+    (r'(\d{1,2})\s+([а-яa-z]+)\s+в\s+(\d{4})', True): [0, 1, 2, 3, 4],
+
+    # 17:36, 14 декабря 2025 или 17:36 14 декабря 2025 
+    (r'(\d{1,2}):(\d{2})[,\s]+(\d{1,2})\s+([а-яёa-z]+)\s+(\d{4})', True): [2, 3, 4, 0, 1],
+
+    # 1. 05.07.2022 г. (с точкой в конце и "г.")
+    (r'(\d{2})\.(\d{2})\.(\d{4})\s*г\.', False): [0, 1, 2, None, None],
+    
+    # 2. 30.12.25 12:53 (двузначный год)
+    (r'(\d{2})\.(\d{2})\.(\d{2})\s+(\d{2}):(\d{2})', True): [0, 1, 2, 3, 4],
+    
+    # 3. пт, 02/27/2026 - 17:27 (с днем недели, слешами и дефисом)
+    (r'[а-я]{2},\s*(\d{2})/(\d{2})/(\d{4})\s*-\s*(\d{2}):(\d{2})', True): [0, 1, 2, 3, 4],
+
+    # 09.12.2025 | 18:47
+    (r'(\d{2})\.(\d{2})\.(\d{4})\s*|\s*(\d{2}):(\d{2})', True): [0, 1, 2, 3, 4],
+
+    # 4 декабря 2025 года, 11:04
+    (r'(\d{1,2})\s+([а-яa-z]+)\s+(\d{4})\s+года?\s*[,]?\s*(\d{1,2}):(\d{2})', True): [0, 1, 2, 3, 4]
+}
+
 patterns = [
     r'^\d{4}—\d{4}$', # Интервалы типа 2024—2025
 ]
@@ -128,10 +177,7 @@ failed_urls_days = {}
 processing_url = {}
 attempted_match_logs = []
 
-def is_date_suitable(parsed_date, default_date_str, date_source, raw_date, has_time):
-    try:
-        target_date = parser.parse(default_date_str)
-    except: return "none"
+def is_date_suitable(parsed_date, target_date, date_source, raw_date, has_time):
 
     # Твоя проверка (разница дней <= 1, месяц и год совпадают)
     is_day_match = (abs(parsed_date.date().day - target_date.date().day) <= 1 and 
@@ -167,53 +213,12 @@ def robust_parse(date_str, default_date_obj=None):
 
     # 1. ОБРАБОТКА "ТОЛЬКО ВРЕМЯ" (Например: "18:30" или "18:30:00")
     time_match = re.search(r'^(\d{1,2}):(\d{2})', date_str)
-    if time_match and len(date_str) <= 8: # Убеждаемся, что строка короткая, а не длинный текст с временем внутри
-        if default_date_obj:
+    if time_match and len(date_str) <= 8:
+        # ПРАВКА: Теперь мы уверены, что работаем с объектом datetime
+        if isinstance(default_date_obj, datetime):
             hour, minute = int(time_match.group(1)), int(time_match.group(2))
-            # Берем дату из GNews и подставляем найденное время
             return default_date_obj.replace(hour=hour, minute=minute, second=0, microsecond=0), True
-        return None
-
-    custom_patterns = { # формат списка [позиция числа, позиция месяца, позиция года, часы, минуты]
-        # "2025-12-01 23:13:00+07:00" - из json
-        (r'(\d{4})-(\d{2})-(\d{2})\s+(\d{2}):(\d{2}):\d{2}[+-]\d{2}:\d{2}', True): [0, 1, 2, 3, 4],
-
-        # 2025-12-01 13:08:28
-        (r'(\d{4})-(\d{2})-(\d{2})\s+(\d{2}):(\d{2})', True): [2, 1, 0, 3, 4],
-
-        # 12-12-2026
-        (r'(\d{4})-(\d{2})-(\d{2})$', False): [0, 1, 2],
-
-        # Паттерн: "03 декабря 2025, 11:35" или "3 дек 2025 11:35"
-        (r'(\d{1,2})\s+([а-яa-z]+)\s+(\d{4})[,\s]+(\d{1,2}):(\d{1,2})', True): [0, 1, 2, 3, 4],
-        
-        # Паттерн: "03 декабря 2025" или "3 дек 2025"
-        (r'(\d{1,2})\s+([а-яa-z]+)\s+(\d{4})', False): [0, 1, 2, None, None],
-        
-        # "Дата публикации: 02 дек 2025"
-        (r'дата публикации:\s*(\d{1,2})\s+([а-яa-z]+)\s+(\d{4})', False): [1, 2, 3, None, None],
-
-        # 04.12.2025 в 07:56
-        (r'(\d{2})\.(\d{2})\.(\d{4})\s+в\s+(\d{1,2}):(\d{2})', True): [0, 1, 2, 3, 4],
-
-        # 04.12.2025 07:56
-        (r'(\d{2})\.(\d{2})\.(\d{4})\s*(?:в)?\s*(\d{1,2}):(\d{2})', True): [0, 1, 2, 3, 4],
-
-        # 5 декабря 2025 в 11:36
-        (r'(\d{1,2})\s+([а-яa-z]+)\s+в\s+(\d{4})', True): [0, 1, 2, 3, 4],
-
-        # 17:36, 14 декабря 2025 или 17:36 14 декабря 2025 
-        (r'(\d{1,2}):(\d{2})[,\s]+(\d{1,2})\s+([а-яёa-z]+)\s+(\d{4})', True): [2, 3, 4, 0, 1],
-
-        # 1. 05.07.2022 г. (с точкой в конце и "г.")
-        (r'(\d{2})\.(\d{2})\.(\d{4})\s*г\.', False): [0, 1, 2, None, None],
-        
-        # 2. 30.12.25 12:53 (двузначный год)
-        (r'(\d{2})\.(\d{2})\.(\d{2})\s+(\d{2}):(\d{2})', True): [0, 1, 2, 3, 4],
-        
-        # 3. пт, 02/27/2026 - 17:27 (с днем недели, слешами и дефисом)
-        (r'[а-я]{2},\s*(\d{2})/(\d{2})/(\d{4})\s*-\s*(\d{2}):(\d{2})', True): [0, 1, 2, 3, 4],
-    }
+        return None, False # Если объекта даты нет, время бесполезно
 
     for (pattern, has_time), indices in custom_patterns.items():
             match = re.search(pattern, date_str)
@@ -289,10 +294,28 @@ def is_valid_date_string(date_str):
             
     return True
 
+def find_key_recursive(obj, key_to_find):
+    """Рекурсивный поиск ключа в словаре или списке."""
+    if isinstance(obj, dict):
+        if key_to_find in obj:
+            return obj[key_to_find]
+        for v in obj.values():
+            result = find_key_recursive(v, key_to_find)
+            if result: return result
+    elif isinstance(obj, list):
+        for item in obj:
+            result = find_key_recursive(item, key_to_find)
+            if result: return result
+    return None
+
 def extract_page_date(driver, url, gnews_date_str):
     missmatched_dates_logger.info(f"\nURL: {url}\nGNews Target: {gnews_date_str}\nFound attempts:")
-    
-    fallback_date = None # Сюда положим дату БЕЗ времени, если найдем
+    try:
+        gnews_dt_obj = parser.parse(gnews_date_str)
+    except:
+        gnews_dt_obj = None
+
+    fallback_date = {"date": None, "has_time": False}
 
     def process_element(raw_value, source):
         nonlocal fallback_date
@@ -302,14 +325,19 @@ def extract_page_date(driver, url, gnews_date_str):
         parsed_dt, has_time = robust_parse(raw_value, gnews_date_str)
         
         if parsed_dt:
-            match_status = is_date_suitable(parsed_dt, gnews_date_str, source, raw_value, has_time)
+            # Твоя оригинальная проверка match_status
+            match_status = is_date_suitable(parsed_dt, gnews_dt_obj, source, raw_value, has_time)
             
             if match_status == "perfect":
-                return parsed_dt # СРАЗУ ВЫХОДИМ! Нашли со временем!
-            elif match_status == "partial" and not fallback_date:
-                fallback_date = parsed_dt # Запоминаем дату без времени и ИЩЕМ ДАЛЬШЕ
-                
-        return None
+                return parsed_dt # СРАЗУ ВЫХОДИМ! Нашли идеальное совпадение
+            
+            elif match_status == "partial":
+                # ПРАВКА: Логика обновления словаря
+                # Обновляем если: еще ничего нет ИЛИ если новая дата с временем, а старая была без
+                if not fallback_date["date"] or (has_time and not fallback_date["has_time"]):
+                    fallback_date["date"] = parsed_dt
+                    fallback_date["has_time"] = has_time
+                    missmatched_dates_logger.info(f"  [FALLBACK UPDATED] {source}: {parsed_dt} (has_time: {has_time})")
 
     # scripts
     for item in js_scripts:
@@ -321,17 +349,9 @@ def extract_page_date(driver, url, gnews_date_str):
                 try:         
                     json_text = script.get_attribute("textContent")
                     data = json.loads(json_text)
-                    
-                    # JSON-LD может быть списком словарей или одним словарем
-                    if isinstance(data, list):
-                        items = data
-                    else:
-                        items = [data]
-                        
-                    for item in items: 
-                        res = item.get("datePublished") or item.get("dateCreated")
-                        if res := process_element(res, "json-ld:datePublished"): 
-                            return res
+                    res = find_key_recursive(data, "datePublished") or find_key_recursive(data, "dateCreated")
+                    if res := process_element(res, "json-ld:datePublished"): 
+                        return res
                             
                 except:
                     continue
@@ -372,7 +392,7 @@ def extract_page_date(driver, url, gnews_date_str):
 def init_driver():
     chrome_options = Options()
     chrome_options.add_argument("--no-sandbox")
-    chrome_options.add_argument("--headless")
+    chrome_options.add_argument("--headless=new")
     chrome_options.add_argument("--disable-dev-shm-usage")
     chrome_options.add_argument("--ignore-certificate-errors")
     chrome_options.add_argument("--allow-insecure-localhost")
@@ -390,6 +410,17 @@ def init_driver():
     driver.set_page_load_timeout(10)
     return driver
 
+def init_stealth_driver():
+    options = uc.ChromeOptions()
+
+    options.add_argument("--disable-blink-features=AutomationControlled")
+
+    options.add_argument("--window-position=3200,0") 
+    options.add_argument("--window-size=1280,600")
+
+    driver = uc.Chrome(options=options, version_main=145)
+    return driver
+
 def get_summary(text, max_sentences=4):
     if not text or len(text) < 100: return "Текст слишком короткий"
     clean_text = " ".join(text.replace("\n", " ").split())
@@ -404,7 +435,7 @@ def get_summary(text, max_sentences=4):
         return f"Ошибка обработки: {e}"
 
 def fetch_with_selenium(keyword, start_date, end_date):
-    driver = init_driver()
+    driver = init_stealth_driver()
     all_news = []
     failed_dates = [] # Сюда попадут только URL с полным нулем
     google_news = GNews(language='ru', country='RU', max_results=100, exclude_websites=excluded_domains)
@@ -491,28 +522,32 @@ def main():
     current_date = start_date
     while current_date <= end_date:
         next_date = current_date + timedelta(days=WINDOW)
-        df, failed = fetch_with_selenium(KEYWORD, current_date, next_date)
-        
-        if not df.empty:
-            file_name = f'{KEYWORD}_{WINDOW}day_news.csv'
-            df.to_csv(file_name, mode='a', index=False, header=not os.path.exists(file_name), encoding='utf-8-sig')
-        
-        if not failed.empty:
-            for f_url in failed.values:
-                url_key = f_url[0]
-                # Получаем данные или пустой кортеж, если данных нет
-                debug_data = failed_urls_days.get(url_key)
-                
-                if debug_data:
-                    extracted_d, default_d, raw_s = debug_data
-                    date_logger.info(
-                        f"Failed match for: {url_key}\n"
-                        f"  -> Default (GNews): {default_d}\n"
-                        f"  -> Extracted (Parsed): {extracted_d}\n"
-                        f"  -> Raw string from site: '{raw_s}'"
+
+        try:
+            df, failed = fetch_with_selenium(KEYWORD, current_date, next_date)
+            
+            if not df.empty:
+                file_name = f'{KEYWORD}_{WINDOW}day_news.csv'
+                df.to_csv(file_name, mode='a', index=False, header=not os.path.exists(file_name), encoding='utf-8-sig')
+            
+            if not failed.empty:
+                for f_url in failed.values:
+                    url_key = f_url[0]
+                    # Получаем данные или пустой кортеж, если данных нет
+                    debug_data = failed_urls_days.get(url_key)
+                    
+                    if debug_data:
+                        extracted_d, default_d, raw_s = debug_data
+                        date_logger.info(
+                            f"Failed match for: {url_key}\n"
+                            f"  -> Default (GNews): {default_d}\n"
+                            f"  -> Extracted (Parsed): {extracted_d}\n"
+                            f"  -> Raw string from site: '{raw_s}'"
                     )
-                
-        current_date = next_date
+        except Exception as e:
+            url_logger.error(f"Ошибка выполнения: {e}")
+        finally:
+            current_date = next_date
 
 if __name__ == "__main__":
     main()
